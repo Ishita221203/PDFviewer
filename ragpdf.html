@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Reader & Vibration Analysis</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.5.0/math.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dsp.js@1.0.1/dsp.js"></script>
+
+    <style>
+        /* CSS Styles */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        body { background-color: #f5f5f5; padding: 20px; }
+        .container { display: flex; flex-direction: column; gap: 20px; max-width: 1200px; margin: 0 auto; }
+        .header { background-color: #4a6fa5; color: white; padding: 20px; border-radius: 8px; text-align: center; }
+        .tabs { display: flex; background-color: #e9e9e9; border-radius: 8px 8px 0 0; overflow: hidden; }
+        .tab { padding: 12px 24px; cursor: pointer; background-color: #e9e9e9; transition: background-color 0.3s; flex: 1; text-align: center; }
+        .tab.active { background-color: #ffffff; }
+        .tab-content { display: none; padding: 20px; background-color: white; border-radius: 0 0 8px 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .tab-content.active { display: block; }
+        .form-group { margin-bottom: 15px; }
+        .form-control { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
+        .btn { background-color: #4a6fa5; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; }
+        .btn:hover { background-color: #3a5a80; }
+        #pdfContainer { width: 100%; min-height: 500px; border: 1px solid #ddd; margin-top: 20px; overflow: auto; position: relative; }
+        .pdf-canvas-container { position: relative; margin: 0 auto; }
+        #pdfCanvas, #annotationCanvas { border: 1px solid #eee; }
+        #vibrationChart { width: 100%; height: 300px; margin-top: 20px; }
+        .results-section { margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 8px; }
+        .result-item { margin-bottom: 10px; }
+        .result-value { font-weight: bold; color: #4a6fa5; }
+        .drag-area { border: 2px dashed #ddd; height: 200px; border-radius: 5px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+        .pdf-controls { display: flex; justify-content: center; margin: 10px 0; gap: 10px; }
+        .alert { padding: 10px; background-color: #f8d7da; color: #721c24; border-radius: 4px; margin-bottom: 15px; display: none; }
+        .toolbar { display: flex; gap: 5px; margin-bottom: 10px; }
+        .annotation-settings { display: flex; gap: 10px; margin: 10px 0; align-items: center; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); }
+        .modal-content { background-color: white; margin: 10% auto; padding: 20px; border-radius: 8px; width: 50%; }
+        #ragQuery { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; margin-bottom: 15px; }
+        #ragResults { margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>PDF Reader & Vibration Analysis Tool</h1>
+            <p>Read PDFs, analyze vibration data, and ask questions using AI</p>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="pdf-reader">PDF Reader</div>
+            <div class="tab" data-tab="vibration-analysis">Vibration Analysis</div>
+            <div class="tab" data-tab="rag-query">Ask Questions (RAG)</div>
+        </div>
+
+        <!-- PDF Reader Tab -->
+        <div class="tab-content active" id="pdf-reader">
+            <div class="drag-area" id="pdfDragArea">
+                <h3>Drag & Drop PDF file or</h3>
+                <input type="file" id="pdfFile" accept=".pdf" hidden>
+                <button class="btn" id="browseBtn">Browse Files</button>
+                <div class="file-info" id="pdfFileInfo"></div>
+            </div>
+            <div id="alert" class="alert"></div>
+
+            <div class="toolbar">
+                <button class="btn btn-sm" id="prevPage">Previous</button>
+                <div id="pageInfo">Page: 0 / 0</div>
+                <button class="btn btn-sm" id="nextPage">Next</button>
+                <input type="number" id="pageNumber" min="1" class="form-control" style="width: 60px;">
+                <button class="btn btn-sm" id="zoomIn">Zoom In</button>
+                <button class="btn btn-sm" id="zoomOut">Zoom Out</button>
+                <button class="btn btn-sm" id="saveAnnotations">Save</button>
+            </div>
+
+            <div id="pdfContainer">
+                <div class="pdf-canvas-container">
+                    <canvas id="pdfCanvas"></canvas>
+                    <canvas id="annotationCanvas"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vibration Analysis Tab -->
+        <div class="tab-content" id="vibration-analysis">
+            <div class="drag-area">
+                <h3>Upload CSV Vibration Data or</h3>
+                <input type="file" id="csvFile" accept=".csv" hidden>
+                <button class="btn" id="csvBrowseBtn">Browse CSV</button>
+            </div>
+            
+            <canvas id="vibrationChart"></canvas>
+            
+            <div class="results-section">
+                <div class="result-item">RMS: <span class="result-value" id="rmsResult">0</span></div>
+                <div class="result-item">Peak Amplitude: <span class="result-value" id="peakResult">0</span></div>
+                <div class="result-item">Dominant Frequency: <span class="result-value" id="freqResult">0</span> Hz</div>
+            </div>
+            
+            <button class="btn" id="analyzeBtn">Analyze Data</button>
+        </div>
+
+        <!-- RAG Query Tab -->
+        <div class="tab-content" id="rag-query">
+            <div class="form-group">
+                <textarea id="ragQuery" class="form-control" rows="4" placeholder="Ask a question about the PDF or vibration data..."></textarea>
+            </div>
+            <button class="btn" id="askBtn">Ask</button>
+            <div class="results-section" id="ragResults">
+                <div class="result-item">Response: <span class="result-value" id="ragResponse"></span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isPDFUploaded = false;
+        let isCSVUploaded = false;
+
+        // PDF Reader Functionality
+        const pdfViewer = {
+            pdfDoc: null,
+            currentPage: 1,
+            scale: 1,
+            rotation: 0,
+            canvas: document.getElementById('pdfCanvas'),
+            annotationCanvas: document.getElementById('annotationCanvas'),
+            fabricCanvas: null,
+
+            init() {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+                this.fabricCanvas = new fabric.Canvas('annotationCanvas', {
+                    isDrawingMode: true,
+                    selection: true
+                });
+                document.getElementById('browseBtn').addEventListener('click', () => document.getElementById('pdfFile').click());
+                document.getElementById('pdfFile').addEventListener('change', (e) => this.handleFile(e));
+
+                // Event Listeners
+                document.getElementById('browseBtn').addEventListener('click', () => document.getElementById('pdfFile').click());
+                document.getElementById('pdfFile').addEventListener('change', (e) => this.handleFile(e));
+                document.getElementById('prevPage').addEventListener('click', () => this.changePage(-1));
+                document.getElementById('nextPage').addEventListener('click', () => this.changePage(1));
+                document.getElementById('pageNumber').addEventListener('change', (e) => this.goToPage(parseInt(e.target.value)));
+                document.getElementById('zoomIn').addEventListener('click', () => this.adjustZoom(0.2));
+                document.getElementById('zoomOut').addEventListener('click', () => this.adjustZoom(-0.2));
+                document.getElementById('saveAnnotations').addEventListener('click', () => this.savePDF());
+            },
+
+            async handleFile(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const buffer = new Uint8Array(e.target.result);
+                        this.pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
+                        this.renderPage(this.currentPage);
+                        isPDFUploaded = true;
+                        this.showAlert('PDF uploaded successfully!', 'success');
+                    } catch (err) {
+                        this.showAlert('Error loading PDF: ' + err.message);
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            },
+            async extractTextFromPDF() {
+                if (!this.pdfDoc) {
+                    throw new Error('No PDF document loaded.');
+                }
+
+                let fullText = '';
+                for (let i = 1; i <= this.pdfDoc.numPages; i++) {
+                    const page = await this.pdfDoc.getPage(i);
+                    const textContent = await page.getTextContent();
+                    fullText += textContent.items.map(item => item.str).join(' ');
+                }
+
+                if (!fullText.trim()) {
+                    throw new Error('PDF has no extractable text.');
+                }
+
+                return fullText;
+            },
+
+            async renderPage(num) {
+                const page = await this.pdfDoc.getPage(num);
+                const viewport = page.getViewport({ scale: this.scale, rotation: this.rotation });
+                
+                this.canvas.width = viewport.width;
+                this.canvas.height = viewport.height;
+                this.annotationCanvas.width = viewport.width;
+                this.annotationCanvas.height = viewport.height;
+
+                const ctx = this.canvas.getContext('2d');
+                await page.render({ canvasContext: ctx, viewport }).promise;
+
+                document.getElementById('pageInfo').textContent = 
+                    `Page: ${this.currentPage} / ${this.pdfDoc.numPages}`;
+                document.getElementById('pageNumber').value = this.currentPage;
+            },
+
+            changePage(offset) {
+                const newPage = this.currentPage + offset;
+                if (newPage > 0 && newPage <= this.pdfDoc.numPages) {
+                    this.currentPage = newPage;
+                    this.renderPage(this.currentPage);
+                }
+            },
+
+            goToPage(num) {
+                if (num > 0 && num <= this.pdfDoc.numPages) {
+                    this.currentPage = num;
+                    this.renderPage(this.currentPage);
+                }
+            },
+
+            adjustZoom(amount) {
+                this.scale = Math.max(0.5, Math.min(3, this.scale + amount));
+                this.renderPage(this.currentPage);
+            },
+
+            savePDF() {
+                // Add annotation saving logic here
+                this.showAlert('Annotations saved successfully!', 'success');
+            },
+
+            showAlert(message, type = 'error') {
+                const alert = document.getElementById('alert');
+                alert.textContent = message;
+                alert.className = `alert ${type}`;
+                alert.style.display = 'block';
+                setTimeout(() => alert.style.display = 'none', 3000);
+            }
+        };
+
+        // Vibration Analysis Functionality
+        const vibrationAnalyzer = {
+            chart: null,
+            data: { time: [], amplitude: [] },
+
+            init() {
+                document.getElementById('csvBrowseBtn').addEventListener('click', () => document.getElementById('csvFile').click());
+                document.getElementById('csvFile').addEventListener('change', (e) => this.handleCSV(e));
+                document.getElementById('analyzeBtn').addEventListener('click', () => this.analyze());
+            },
+
+            handleCSV(e) {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    try{
+                        this.parseCSV(e.target.result);
+                        this.plotData();
+                        isCSVUploaded = true;
+                        this.showAlert('CSV uploaded successfully!', 'success');
+                    } catch (err) {
+                        this.showAlert('Error parsing CSV: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            },
+
+            parseCSV(csv) {
+                this.data = { time: [], amplitude: [] };
+                const rows = csv.split('\n').filter(row => row.trim() !== '');
+                if (rows.length === 0) throw new Error('CSV file is empty.');
+                const firstCols = rows[0].split(',');
+                const hasHeader = isNaN(firstCols[0]) || isNaN(firstCols[1]);
+                const startIndex = hasHeader ? 1 : 0;
+                for (let i = startIndex; i < rows.length; i++) {
+                    const cols = rows[i].split(',');
+                    if (cols.length < 2) continue;
+                    const time = parseFloat(cols[0]);
+                    const amp = parseFloat(cols[1]);
+                    if (isNaN(time) || isNaN(amp)) throw new Error(`Invalid data in row ${i + 1}.`);
+                    this.data.time.push(time);
+                    this.data.amplitude.push(amp);
+                }
+            },
+
+            plotData() {
+                if (this.chart) this.chart.destroy();
+
+                this.chart = new Chart(document.getElementById('vibrationChart'), {
+                    type: 'line',
+                    data: {
+                        labels: this.data.time,
+                        datasets: [{
+                            label: 'Vibration Data',
+                            data: this.data.amplitude,
+                            borderColor: '#4a6fa5',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: { title: { display: true, text: 'Time (s)' } },
+                            y: { title: { display: true, text: 'Amplitude (g)' } }
+                        }
+                    }
+                });
+            },
+
+            analyze() {
+                try {
+                    if (this.data.amplitude.length === 0) {
+                        throw new Error('No data to analyze!');
+                    }
+
+                    // Ensure we have a power-of-2 length for FFT
+                    const validLength = this.nearestPowerOfTwo(this.data.amplitude.length);
+                    const amplitude = this.data.amplitude.slice(0, validLength);
+
+                    // Calculate RMS
+                    const squared = amplitude.map(a => a * a);
+                    const rms = Math.sqrt(math.mean(squared)).toFixed(4);
+
+                    // Calculate Peak
+                    const peak = Math.max(...amplitude.map(a => Math.abs(a))).toFixed(4);
+
+                    // Calculate Frequency using dsp.js
+                    const fft = new FFT(validLength, validLength);
+                    const signal = new Float32Array(amplitude);
+                    fft.forward(signal);
+
+                    // Find the index of the maximum magnitude
+                    const magnitudes = fft.spectrum;
+                    const maxIndex = magnitudes.indexOf(Math.max(...magnitudes));
+
+                    // Calculate sampling frequency
+                    const timeStep = this.calculateTimeStep();
+                    const samplingFreq = timeStep > 0 ? 1 / timeStep : 0;
+                    const freq = samplingFreq > 0 ? (maxIndex * samplingFreq) / validLength : 0;
+
+                    // Update results
+                    document.getElementById('rmsResult').textContent = rms;
+                    document.getElementById('peakResult').textContent = peak;
+                    document.getElementById('freqResult').textContent = freq.toFixed(2);
+
+                } catch (error) {
+                    console.error('Analysis error:', error);
+                    alert(`Analysis failed: ${error.message}`);
+                }
+            },
+
+            nearestPowerOfTwo(length) {
+                return Math.pow(2, Math.floor(Math.log2(length)));
+            },
+
+            calculateTimeStep() {
+                if (this.data.time.length < 2) return 0;
+                const totalTime = this.data.time[this.data.time.length - 1] - this.data.time[0];
+                return totalTime / (this.data.time.length - 1);
+            }
+        };
+
+        // RAG Functionality
+        const ragQueryHandler = {
+            init() {
+                document.getElementById('askBtn').addEventListener('click', () => this.askQuestion());
+            },
+
+            async askQuestion() {
+                const query = document.getElementById('ragQuery').value.trim();
+                if (!query) {
+                    alert('Please enter a question!');
+                    return;
+                }
+                try {
+                    document.getElementById('ragResponse').textContent = 'Loading...';
+                    let context = '';
+                    if (isPDFUploaded) {
+                        context = await pdfViewer.extractTextFromPDF();
+                    } else if (isCSVUploaded) {
+                        const csvData = vibrationAnalyzer.data;
+                        context = `Time Series Data:\n${csvData.time.map((t, i) => `Time: ${t}, Amplitude: ${csvData.amplitude[i]}`).join('\n')}`;
+                    } else {
+                        throw new Error('Please upload a PDF or CSV file first.');
+                    }
+                    const fullQuery = `Context:\n${context}\n\nQuestion: ${query}\n\nAnswer only based on the context provided.`;
+                    const response = await this.sendQueryToGroq(fullQuery);
+                    document.getElementById('ragResponse').textContent = response;
+                } catch (error) {
+                    document.getElementById('ragResponse').textContent = `Error: ${error.message}`;
+                }
+            },
+
+            async sendQueryToGroq(query) {
+                const GROQ_API_KEY = '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'; // Replace with your key
+                const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+                const payload = {
+                    model: 'llama-3.3-70b-versatile',
+                    messages: [{ role: 'user', content: query }],
+                    max_tokens: 500,
+                    temperature: 0.7
+                };
+                const response = await fetch(GROQ_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API error: ${errorData.error?.message || response.statusText}`);
+                }
+                const data = await response.json();
+                return data.choices[0].message.content;
+            }
+        };
+
+ // Initialize RAG feature
+document.addEventListener('DOMContentLoaded', () => {
+    pdfViewer.init();
+    vibrationAnalyzer.init();
+    ragQueryHandler.init();
+
+    // Tab Switching
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelector('.tab.active').classList.remove('active');
+            tab.classList.add('active');
+            document.querySelector('.tab-content.active').classList.remove('active');
+            document.getElementById(tab.dataset.tab).classList.add('active');
+        });
+    });
+});
+    </script>
+</body>
+</html>
